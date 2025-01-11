@@ -3,9 +3,10 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.autograd import grad
 import matplotlib.pyplot as plt
+from torch.autograd import Variable
 
 class Trainer:
-    def __init__(self, discriminator, generator, dataloader, lr, beta1, beta2, mode="normal", lambda_gp=10):
+    def __init__(self, discriminator, generator, dataloader, lr, beta1, beta2, device, mode="normal", lambda_gp=10, gp_weight=10):
         """
         Args:
             discriminator: The discriminator model.
@@ -20,11 +21,16 @@ class Trainer:
         self.discriminator = discriminator
         self.generator = generator
         self.dataloader = dataloader
+        self.D_loss = [] 
+        self.G_loss = [] 
+        self.gradient_penalty_list = []
         self.lr = lr
+        self.gp_weight = gp_weight
         self.beta1 = beta1
         self.beta2 = beta2
         self.mode = mode
         self.lambda_gp = lambda_gp
+        self.device
 
         # Optimizers for discriminator and generator
         self.optimizer_D = optim.Adam(self.discriminator.parameters(), lr=self.lr, betas=(self.beta1, self.beta2))
@@ -34,35 +40,49 @@ class Trainer:
         if self.mode == "normal":
             self.criterion = nn.BCELoss()
 
-    def gradient_penalty(self, real_data, fake_data):
-        """
-        Computes the gradient penalty for WGAN-GP.
+    def sample_latent(self, num_samples):
+        return torch.randn((num_samples, self.generator.latent_dim))
 
-        Args:
-            real_data: Batch of real data samples.
-            fake_data: Batch of generated data samples.
+    def sample_generator(self, num_samples):
+        latent_samples = Variable(self.sample_latent(num_samples)).to(self.device)
+        generated_data = self.generator(latent_samples)
+        return generated_data
 
-        Returns:
-            Gradient penalty term.
-        """
-        batch_size = real_data.size(0)
-        epsilon = torch.rand(batch_size, 1, 1, 1, device=real_data.device)  # Random weight for interpolation
-        interpolates = epsilon * real_data + (1 - epsilon) * fake_data
-        interpolates.requires_grad_(True)
+    def sample(self, num_samples):
+        generated_data = self.sample_generator(num_samples)
+        # Remove color channel
+        return generated_data.data.cpu().numpy()[:, 0, :, :]
+    
+    def _gradient_penalty(self, real_data, generated_data):
+        batch_size = real_data.size()[0]
 
-        # Compute discriminator output for interpolates
-        d_interpolates = self.discriminator(interpolates)
-        gradients = grad(outputs=d_interpolates,
-                         inputs=interpolates,
-                         grad_outputs=torch.ones_like(d_interpolates),
-                         create_graph=True, retain_graph=True, only_inputs=True)[0]
+        # Calculate interpolation
+        alpha = torch.rand(batch_size, 1, 1, 1)
+        alpha = alpha.expand_as(real_data)
+        alpha = alpha.to(self.device)
+        interpolated = alpha * real_data.data + (1 - alpha) * generated_data.data
+        interpolated = Variable(interpolated, requires_grad=True)
+        interpolated = interpolated.to(self.device)
 
-        # Reshape and compute gradient norm
+        # Calculate probability of interpolated examples
+        prob_interpolated = self.discriminator(interpolated)
+
+        # Calculate gradients of probabilities with respect to examples
+        gradients = grad(outputs=prob_interpolated, inputs=interpolated,
+                               grad_outputs=torch.ones(prob_interpolated.size()).to(self.device),
+                               create_graph=True, retain_graph=True)[0]
+
+        # Gradients have shape (batch_size, num_channels, img_width, img_height),
+        # so flatten to easily take norm per example in batch
         gradients = gradients.view(batch_size, -1)
-        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
-        return gradient_penalty
+        # Derivatives of the gradient close to 0 can cause problems because of
+        # the square root, so manually calculate norm and add epsilon
+        gradients_norm = torch.sqrt(torch.sum(gradients ** 2, dim=1) + 1e-12)
 
-    def train_discriminator(self, real_data, fake_data):
+        # Return gradient penalty
+        return self.gp_weight * ((gradients_norm - 1) ** 2).mean()
+
+    def train_discriminator(self, real_data):
         """
         Trains the discriminator on real and fake data.
 
@@ -73,7 +93,13 @@ class Trainer:
         Returns:
             The loss value for the discriminator.
         """
-        self.optimizer_D.zero_grad()
+        batch_size = real_data.size()[0]
+        generated_data = self.sample_generator(batch_size)
+
+        real_data = Variable(real_data)
+        real_data = real_data.to(self.device)
+        d_real = self.discriminator(real_data)
+        d_generated = self.discriminator(generated_data)
 
         if self.mode == "normal":
             # Labels for real and fake data
@@ -86,20 +112,28 @@ class Trainer:
 
             d_loss = real_loss + fake_loss
 
+            # Backpropagation and optimizer step
+            d_loss.backward()
+            self.optimizer_D.step()
+            self.D_loss.append(d_loss.data[0])
+            return d_loss.item()
+        
         elif self.mode == "wasserstein":
-            # Wasserstein loss (critic score difference)
-            d_loss = -(self.discriminator(real_data).mean() - self.discriminator(fake_data.detach()).mean())
+            # compute gradient penalty
+            gp = self.gradient_penalty(real_data, generated_data)
+            self.gradient_penalty_list.append(gp.data[0])
 
-            # Add gradient penalty
-            gp = self.gradient_penalty(real_data, fake_data)
-            d_loss += self.lambda_gp * gp
+            self.optimizer_D.zero_grad()
+            d_loss = d_generated.mean() - d_real.mean() + gp
+        
+            # Backpropagation and optimizer step
+            d_loss.backward()
+            self.optimizer_D.step()
+            self.D_loss.append(d_loss.data[0])
+            return d_loss.data[0]
 
-        # Backpropagation and optimizer step
-        d_loss.backward()
-        self.optimizer_D.step()
-        return d_loss.item()
 
-    def train_generator(self, fake_data):
+    def train_generator(self, data):
         """
         Trains the generator to produce realistic data.
 
@@ -110,6 +144,8 @@ class Trainer:
             The loss value for the generator.
         """
         self.optimizer_G.zero_grad()
+        batch_size = data.size()[0]
+        generated_data = self.sample_generator(batch_size)
 
         if self.mode == "normal":
             # Labels for fake data (treated as real)
@@ -118,12 +154,14 @@ class Trainer:
 
         elif self.mode == "wasserstein":
             # Wasserstein loss (maximize critic score)
-            g_loss = -self.discriminator(fake_data).mean()
+            d_generated = self.discriminator(generated_data)
+            g_loss = - d_generated.mean()
 
-        # Backpropagation and optimizer step
-        g_loss.backward()
-        self.optimizer_G.step()
-        return g_loss.item()
+            # Backpropagation and optimizer step
+            g_loss.backward()
+            self.optimizer_G.step()
+            self.G_loss.append(g_loss.data[0])
+            return g_loss.data[0]
 
     def train(self, num_epochs, device):
         """

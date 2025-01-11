@@ -23,7 +23,7 @@ def main(opt):
     discriminator = Discriminator(opt["img_size"], opt["dim"])
     generator = Generator(opt["img_size"], opt["latent_dim"], opt["dim"])
 
-    trainer = Trainer(discriminator, generator, train_loader, opt["lr"], opt["beta1"], opt["beta2"], mode="normal", lambda_gp=10)
+    trainer = Trainer(discriminator, generator, train_loader, opt["lr"], opt["beta1"], opt["beta2"], opt["device"], mode="normal", lambda_gp=10)
 
     G_losses, D_losses, D_accuracies = trainer.train(opt["num_epochs"], opt["device"])
 
