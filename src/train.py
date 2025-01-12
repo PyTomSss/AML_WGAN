@@ -29,7 +29,7 @@ class Trainer:
         self.beta2 = beta2
         self.mode = mode
         self.lambda_gp = lambda_gp
-        self.device
+        self.device = device
         self.criterion = nn.BCELoss()
 
         # Optimizers for discriminator and generator
@@ -52,8 +52,8 @@ class Trainer:
         generated_data = self.sample_generator(num_samples)
         # Remove color channel
         return generated_data.data.cpu().numpy()[:, 0, :, :]
-    
-    def _gradient_penalty(self, real_data, generated_data):
+   
+    def gradient_penalty(self, real_data, generated_data):
         batch_size = real_data.size()[0]
 
         # Calculate interpolation
@@ -118,7 +118,7 @@ class Trainer:
         elif self.mode == "wasserstein":
             # compute gradient penalty
             gp = self.gradient_penalty(real_data, generated_data)
-            self.gradient_penalty_list.append(gp.data[0])
+            self.gradient_penalty_list.append(gp.item())
 
             self.optimizer_D.zero_grad()
             d_loss = d_generated.mean() - d_real.mean() + gp
@@ -126,7 +126,7 @@ class Trainer:
             # Backpropagation and optimizer step
             d_loss.backward()
             self.optimizer_D.step()
-            return d_loss.data[0]
+            return d_loss.item()
 
 
     def train_generator(self, generated_data):
@@ -146,7 +146,7 @@ class Trainer:
             # Labels for fake data (treated as real)
             real_labels = torch.ones(generated_data.size(0), 1, device=self.device)
             g_loss = self.criterion(self.discriminator(generated_data), real_labels)
-            return g_loss.data[0]
+            return g_loss.item()
 
 
         elif self.mode == "wasserstein":
@@ -155,9 +155,9 @@ class Trainer:
             g_loss = - d_generated.mean()
 
             # Backpropagation and optimizer step
-            g_loss.backward()
+            g_loss.backward(retain_graph=True)
             self.optimizer_G.step()
-            return g_loss.data[0]
+            return g_loss.item()
 
     def train(self, num_epochs):
         """
@@ -194,7 +194,7 @@ class Trainer:
                     n_critic = 1
 
                 if i % n_critic == 0:
-                    g_loss = self.train_generator(data=generated_data)
+                    g_loss = self.train_generator(generated_data=generated_data)
 
                 # Save losses for plotting
                 self.G_loss.append(g_loss)
