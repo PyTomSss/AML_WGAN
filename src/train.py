@@ -14,16 +14,15 @@ class Trainer:
             dataloader: The dataloader for training data.
             lr: Learning rate.
             beta1: Beta1 parameter for Adam optimizer.
-            beta2: Beta2 parameter for Adam optimizer.
+           beta2: Beta2 parameter for Adam optimizer.
             mode: "normal" or "wasserstein" to choose the training type.
             lambda_gp: Coefficient for gradient penalty in WGAN-GP.
         """
         self.discriminator = discriminator
         self.generator = generator
         self.dataloader = dataloader
-        self.D_loss = [] 
-        self.G_loss = [] 
-        self.gradient_penalty_list = []
+        # store accuracies and losses for plotting
+        self.D_loss, self.G_loss, self.gradient_penalty_list, self.D_accuracies = [], [], [], []
         self.lr = lr
         self.gp_weight = gp_weight
         self.beta1 = beta1
@@ -31,6 +30,7 @@ class Trainer:
         self.mode = mode
         self.lambda_gp = lambda_gp
         self.device
+        self.criterion = nn.BCELoss()
 
         # Optimizers for discriminator and generator
         self.optimizer_D = optim.Adam(self.discriminator.parameters(), lr=self.lr, betas=(self.beta1, self.beta2))
@@ -82,7 +82,7 @@ class Trainer:
         # Return gradient penalty
         return self.gp_weight * ((gradients_norm - 1) ** 2).mean()
 
-    def train_discriminator(self, real_data):
+    def train_discriminator(self, real_data, generated_data):
         """
         Trains the discriminator on real and fake data.
 
@@ -93,29 +93,26 @@ class Trainer:
         Returns:
             The loss value for the discriminator.
         """
-        batch_size = real_data.size()[0]
-        generated_data = self.sample_generator(batch_size)
-
+        self.optimizer_D.zero_grad()
         real_data = Variable(real_data)
-        real_data = real_data.to(self.device)
         d_real = self.discriminator(real_data)
         d_generated = self.discriminator(generated_data)
 
         if self.mode == "normal":
             # Labels for real and fake data
-            real_labels = torch.ones(real_data.size(0), 1, device=real_data.device)
-            fake_labels = torch.zeros(fake_data.size(0), 1, device=fake_data.device)
+            real_labels = torch.ones(real_data.size(0), 1, device=self.device)
+            fake_labels = torch.zeros(generated_data.size(0), 1, device=self.device)
 
             # Loss for real and fake data
-            real_loss = self.criterion(self.discriminator(real_data), real_labels)
-            fake_loss = self.criterion(self.discriminator(fake_data.detach()), fake_labels)
+            real_loss = self.criterion(d_real, real_labels)
+            fake_loss = self.criterion(d_generated, fake_labels)
 
+            # self.discriminator(fake_data.detach())
             d_loss = real_loss + fake_loss
 
             # Backpropagation and optimizer step
             d_loss.backward()
             self.optimizer_D.step()
-            self.D_loss.append(d_loss.data[0])
             return d_loss.item()
         
         elif self.mode == "wasserstein":
@@ -129,11 +126,10 @@ class Trainer:
             # Backpropagation and optimizer step
             d_loss.backward()
             self.optimizer_D.step()
-            self.D_loss.append(d_loss.data[0])
             return d_loss.data[0]
 
 
-    def train_generator(self, data):
+    def train_generator(self, generated_data):
         """
         Trains the generator to produce realistic data.
 
@@ -144,13 +140,14 @@ class Trainer:
             The loss value for the generator.
         """
         self.optimizer_G.zero_grad()
-        batch_size = data.size()[0]
-        generated_data = self.sample_generator(batch_size)
+        d_generated = self.discriminator(generated_data) 
 
         if self.mode == "normal":
             # Labels for fake data (treated as real)
-            real_labels = torch.ones(fake_data.size(0), 1, device=fake_data.device)
-            g_loss = self.criterion(self.discriminator(fake_data), real_labels)
+            real_labels = torch.ones(generated_data.size(0), 1, device=self.device)
+            g_loss = self.criterion(self.discriminator(generated_data), real_labels)
+            return g_loss.data[0]
+
 
         elif self.mode == "wasserstein":
             # Wasserstein loss (maximize critic score)
@@ -160,10 +157,9 @@ class Trainer:
             # Backpropagation and optimizer step
             g_loss.backward()
             self.optimizer_G.step()
-            self.G_loss.append(g_loss.data[0])
             return g_loss.data[0]
 
-    def train(self, num_epochs, device):
+    def train(self, num_epochs):
         """
         Main training loop for the GAN, including discriminator accuracy calculation.
 
@@ -173,13 +169,8 @@ class Trainer:
             save_path_generator: Path to save the trained generator model.
             save_path_discriminator: Path to save the trained discriminator model.
         """
-        self.discriminator.to(device)
-        self.generator.to(device)
-
-        # Store losses for plotting
-        G_losses = []
-        D_losses = []
-        D_accuracies = []  # Store discriminator accuracies for plotting
+        self.discriminator.to(self.device)
+        self.generator.to(self.device)
 
         for epoch in range(num_epochs):
             # Initialize variables for calculating accuracy
@@ -188,15 +179,13 @@ class Trainer:
             total = 0
 
             for i, (real_data, _) in enumerate(self.dataloader):
-                real_data = real_data.to(device)
-                batch_size = real_data.size(0)
-
+                real_data = real_data.to(self.device)
                 # Generate fake data
-                noise = self.generator.init_weight(batch_size).to(device)
-                fake_data = self.generator(noise)
+                batch_size = real_data.size(0)
+                generated_data = self.sample_generator(batch_size).to(self.device)
 
                 # Train discriminator
-                d_loss = self.train_discriminator(real_data, fake_data)
+                d_loss = self.train_discriminator(real_data=real_data, generated_data=generated_data)
 
                 # Train generator every n_critic steps (1 step for normal GANs)
                 if self.mode == "wasserstein":
@@ -205,15 +194,15 @@ class Trainer:
                     n_critic = 1
 
                 if i % n_critic == 0:
-                    g_loss = self.train_generator(fake_data)
+                    g_loss = self.train_generator(data=generated_data)
 
                 # Save losses for plotting
-                G_losses.append(g_loss)
-                D_losses.append(d_loss)
+                self.G_loss.append(g_loss)
+                self.D_loss.append(d_loss)
 
                 # Calculate accuracy for the discriminator
                 real_preds = self.discriminator(real_data)
-                fake_preds = self.discriminator(fake_data.detach())  # Detach fake data to avoid gradients affecting the generator
+                fake_preds = self.discriminator(generated_data.detach())  # Detach fake data to avoid gradients affecting the generator
 
                 # Count correct real and fake predictions
                 correct_real += (real_preds > 0.5).sum().item()  # Real images should be classified as 1
@@ -227,7 +216,7 @@ class Trainer:
 
             # Calculate overall discriminator accuracy for the epoch
             epoch_accuracy = 100 * (correct_real + correct_fake) / total
-            D_accuracies.append(epoch_accuracy)
+            self.D_accuracies.append(epoch_accuracy)
 
         # Print accuracy after each epoch
         print(f"Epoch [{epoch + 1}/{num_epochs}] - Discriminator Accuracy: {epoch_accuracy:.2f}%")
@@ -242,14 +231,14 @@ class Trainer:
         # Plot the generator and discriminator losses
         plt.figure(figsize=(10, 5))
         plt.title("Generator and Discriminator Loss During Training")
-        plt.plot(G_losses, label="G")
-        plt.plot(D_losses, label="D")
+        plt.plot(self.G_loss, label="G")
+        plt.plot(self.D_loss, label="D")
         plt.xlabel("Iterations")
         plt.ylabel("Loss")
         plt.legend()
         plt.show()
 
-        return G_losses, D_losses, D_accuracies
+        return self.G_loss, self.D_loss, self.D_accuracies
 
 # Exemple d'utilisation :
 # trainer = Trainer(discriminator, generator, dataloader, lr=0.0002, beta1=0.5, beta2=0.999, mode="wasserstein")
