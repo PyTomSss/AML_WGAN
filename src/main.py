@@ -1,5 +1,6 @@
-from src.train import Trainer
-from src.gan_models import Generator, Discriminator
+from models.dcgan import DCGAN_Trainer
+from models.wgan_cp import WGANCP_Trainer
+
 import torch
 from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
@@ -18,13 +19,17 @@ def main(opt):
     train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
 
     # Créer un DataLoader pour charger les données
-    train_loader = DataLoader(train_dataset, batch_size=opt["batch_size"], shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=opt["batch_size"], shuffle=True)
 
-    discriminator = Discriminator(opt["img_size"], opt["dim"])
-    generator = Generator(opt["img_size"], opt["latent_dim"], opt["dim"])
+    if opt["mode"] == "normal":
+        trainer = DCGAN_Trainer(opt, train_dataloader)
+    elif opt["mode"] == "wasserstein":
+        trainer = WGANCP_Trainer(opt, train_dataloader)
+    
+    else: 
+        print("mode not recognized")
 
-    trainer = Trainer(discriminator, generator, train_loader, opt["lr"], opt["beta1"], opt["beta2"], opt["device"], mode=opt["mode"], lambda_gp=10)
 
-    G_losses, D_losses, D_accuracies = trainer.train(opt["num_epochs"])
+    G_losses, D_losses, epoch_times, training_times = trainer.train()
 
-    return G_losses, D_losses, D_accuracies
+    return G_losses, D_losses, epoch_times, training_times
