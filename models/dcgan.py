@@ -127,6 +127,28 @@ class DCGAN_Trainer(object):
         self.loss = nn.BCELoss().to(self.device)
 
         self.num_epochs = opt["num_epochs"]
+        # Fix a latent vector to generate consistent images
+        self.fixed_latent_vector = torch.randn((1, self.generator.latent_dim)).to(self.device)
+
+        self.list_img = []
+
+    def save_generated_image(self, epoch):
+        """
+        Generate and save an image using the fixed latent vector.
+        """
+        self.generator.eval()  # Set the generator to evaluation mode
+        with torch.no_grad():
+            generated_image = self.generator(self.fixed_latent_vector)
+        generated_image = generated_image.squeeze(0).cpu().numpy().transpose(1, 2, 0)  # Reshape for visualization
+        generated_image = (generated_image * 255).astype('uint8')  # Scale to [0, 255]
+
+        return generated_image
+
+        plt.imshow(generated_image, cmap='gray' if generated_image.shape[-1] == 1 else None)
+        plt.axis('off')
+        plt.title(f"Epoch {epoch+1}")
+        plt.savefig(f"generated_image_epoch_{epoch+1}.png")
+        plt.show()
 
     def train(self):
         """
@@ -212,12 +234,18 @@ class DCGAN_Trainer(object):
             print(f"Epoch {epoch+1} completed in {self.epoch_times[-1]:.2f}s")
             print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}")
             
+            # Display generated image every 5 epochs
+            if (epoch + 1) % opt["img_plot_periodicity"] == 0:
+                img = self.save_generated_image(epoch)
+                self.list_img.append(img)
+
+
         total_time_end = t.time()
         self.training_time = total_time_end - total_time_start
         print('Time of training-{}'.format((self.training_time)))
 
-        save_path_generator=f"../trained_models/DCGANgenerator_epoch{self.num_epochs}.pth"
-        save_path_discriminator=f"../trained_models/DCGANdiscriminator_epoch{self.num_epochs}.pth"
+        save_path_generator = f"../trained_models/DCGANgenerator_epoch{self.num_epochs}.pth"
+        save_path_discriminator = f"../trained_models/DCGANdiscriminator_epoch{self.num_epochs}.pth"
         # Save the trained models
         torch.save(self.generator.state_dict(), save_path_generator)
         torch.save(self.discriminator.state_dict(), save_path_discriminator)
