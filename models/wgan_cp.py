@@ -6,6 +6,7 @@ from torch import autograd
 import time as t
 import matplotlib.pyplot as plt
 import os
+from tqdm import tqdm
 
 ###### DISCRIMINATOR NETWORK 
 # D(x) is the discriminator network which outputs the (scalar) probability that x
@@ -38,9 +39,9 @@ class WGANCPDiscriminator(nn.Module):
         # Output size calculation after 4 convolutions with stride 2 (halving size each time)
         output_size = 8 * dim * (img_size[1] // 16) * (img_size[2] // 16)
         self.features_to_prob = nn.Sequential(
-            nn.Linear(output_size, 1),
-            nn.Sigmoid()
+            nn.Linear(output_size, 1)  # Pas de Sigmoid ici
         )
+
 
     def forward(self, input_data):
         batch_size = input_data.size()[0]
@@ -113,9 +114,32 @@ class WGANCP_Trainer(object):
         self.optimizer_D = optim.RMSprop(self.discriminator.parameters(), lr=self.lr)
         self.optimizer_G = optim.RMSprop(self.generator.parameters(), lr=self.lr)
 
+        self.fixed_latent_vector = torch.randn((1, self.generator.latent_dim)).to(self.device)
         self.n_critic = opt["n_critic"]
         self.clip_val = opt["clip_val"]
+        self.num_epochs = opt["num_epochs"]
+        self.img_plot_periodicity = opt["img_plot_periodicity"]
 
+        self.list_img = []
+
+    def save_generated_image(self, epoch):
+        """
+        Generate and save an image using the fixed latent vector.
+        """
+        self.generator.eval()  # Set the generator to evaluation mode
+        with torch.no_grad():
+            generated_image = self.generator(self.fixed_latent_vector)
+        generated_image = generated_image.squeeze(0).cpu().numpy().transpose(1, 2, 0)  # Reshape for visualization
+        generated_image = (generated_image * 255).astype('uint8')  # Scale to [0, 255]
+
+        plt.imshow(generated_image, cmap='gray' if generated_image.shape[-1] == 1 else None)
+        plt.axis('off')
+        plt.title(f"Epoch {epoch+1}")
+        plt.savefig(f"generated_image_epoch_{epoch+1}.png")
+        plt.show()
+
+        return generated_image
+        
     def train(self):
 
         self.discriminator.to(self.device)
@@ -128,9 +152,12 @@ class WGANCP_Trainer(object):
             epoch_discriminator_loss = 0
             epoch_generator_loss = 0
 
-            for i, (image, _) in enumerate(self.dataloader):
+            for i, (img, _) in enumerate(tqdm(self.dataloader, desc=f'Epoch {epoch+1}/{self.num_epochs}', ncols=100)):
 
-                real_imgs = image.to(self.device)
+                if img.size(0) < self.batch_size:
+                    continue
+
+                img = img.to(self.device)
 
                 #####################################################################################
                 ################################ TRAIN DISCRIMINATOR ################################
@@ -138,10 +165,10 @@ class WGANCP_Trainer(object):
 
                 for _ in range(self.n_critic):
 
-                    z = torch.randn(real_imgs.size(0), self.generator.latent_dim).to(self.device)
+                    z = torch.randn(img.size(0), self.generator.latent_dim).to(self.device)
                     fake_imgs = self.generator(z).detach()
 
-                    d_loss = -torch.mean(self.discriminator(real_imgs)) + torch.mean(self.discriminator(fake_imgs))
+                    d_loss = -torch.mean(self.discriminator(img)) + torch.mean(self.discriminator(fake_imgs))
 
                     self.optimizer_D.zero_grad()
                     d_loss.backward()
@@ -157,7 +184,7 @@ class WGANCP_Trainer(object):
                 ################################## TRAIN GENERATOR ##################################
                 #####################################################################################
 
-                z = torch.randn(real_imgs.size(0), self.generator.latent_dim).to(self.device)
+                z = torch.randn(img.size(0), self.generator.latent_dim).to(self.device)
                 fake_imgs = self.generator(z)
                 g_loss = -torch.mean(self.discriminator(fake_imgs))
 
@@ -165,11 +192,6 @@ class WGANCP_Trainer(object):
                 self.optimizer_G.zero_grad()
                 g_loss.backward()
                 self.optimizer_G.step()
-                                # Print loss and accuracy every 50 iterations
-                if i % 50 == 0:
-                    print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f'
-                        % (epoch + 1, self.num_epochs, i, len(self.dataloader), d_loss, g_loss))
-
 
             # save the time taken by the epoch
             self.epoch_times.append(t.time() - start_time)
@@ -180,12 +202,21 @@ class WGANCP_Trainer(object):
             self.G_loss.append(avg_generator_loss)
             self.D_loss.append(avg_discriminator_loss)
         
+            # Print the average losses at the end of the epoch
+            print(f"Epoch {epoch+1} completed in {self.epoch_times[-1]:.2f}s")
+            print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}")
+            
+            # Display generated image every 5 epochs
+            if (epoch + 1) % self.img_plot_periodicity == 0:
+                img = self.save_generated_image(epoch)
+                self.list_img.append(img)
+
         total_time_end = t.time()
         self.training_time = total_time_end - total_time_start
         print('Time of training-{}'.format((self.training_time)))
 
-        save_path_generator=f"../trained_models/WGANCPgenerator_epoch{self.num_epochs}.pth"
-        save_path_discriminator=f"../trained_models/WGANCPdiscriminator_epoch{self.num_epochs}.pth"
+        save_path_generator = f"../trained_models/WGANCPgenerator_epoch{self.num_epochs}.pth"
+        save_path_discriminator = f"../trained_models/WGANCPdiscriminator_epoch{self.num_epochs}.pth"
         # Save the trained models
         torch.save(self.generator.state_dict(), save_path_generator)
         torch.save(self.discriminator.state_dict(), save_path_discriminator)

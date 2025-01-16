@@ -1,5 +1,6 @@
 from models.dcgan import DCGAN_Trainer
 from models.wgan_cp import WGANCP_Trainer
+from models.wgan_gp import WGANGP_Trainer
 
 import torch
 from torchvision import datasets, transforms
@@ -23,9 +24,10 @@ def main(opt):
 
     if opt["mode"] == "normal":
         trainer = DCGAN_Trainer(opt, train_dataloader)
-    elif opt["mode"] == "wasserstein":
+    elif opt["mode"] == "wasserstein-cp":
         trainer = WGANCP_Trainer(opt, train_dataloader)
-    
+    elif opt["mode"] == "wasserstein-gp":
+        trainer = WGANGP_Trainer(opt, train_dataloader)
     else: 
         print("mode not recognized")
 
