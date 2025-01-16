@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from torch.autograd import Variable
 import time as t
 import torch.nn.functional as F
-
+from tqdm import tqdm
 
 ###### DISCRIMINATOR NETWORK 
 # D(x) is the discriminator network which outputs the (scalar) probability that x
@@ -124,7 +124,7 @@ class DCGAN_Trainer(object):
         self.optimizer_D = optim.Adam(self.discriminator.parameters(), lr=self.lr, betas=(self.beta1, self.beta2))
         self.optimizer_G = optim.Adam(self.generator.parameters(), lr=self.lr, betas=(self.beta1, self.beta2))
 
-        self.criterion = nn.BCELoss().to(self.device)
+        self.loss = nn.BCELoss().to(self.device)
 
         self.num_epochs = opt["num_epochs"]
 
@@ -149,14 +149,18 @@ class DCGAN_Trainer(object):
             epoch_generator_loss = 0
 
 
-            for i, (real_data, _) in enumerate(self.dataloader):
-                real_data = real_data.to(self.device)
+            for i, (img, _) in enumerate(tqdm(self.dataloader, desc=f'Epoch {epoch+1}/{self.num_epochs}', ncols=100)):
+
+                if img.size(0) < self.batch_size:
+                    continue
+
+                img = img.to(self.device)
 
                 z = torch.randn((self.batch_size, self.generator.latent_dim))
                 real_labels = torch.ones(self.batch_size)
                 fake_labels = torch.zeros(self.batch_size)
 
-                images, z = Variable(images).to(self.device), Variable(z).to(self.device)
+                images, z = Variable(img).to(self.device), Variable(z).to(self.device)
                 real_labels, fake_labels = Variable(real_labels).to(self.device), Variable(fake_labels).to(self.device)
 
                 #####################################################################################
@@ -169,7 +173,7 @@ class DCGAN_Trainer(object):
 
                 fake_images = self.generator(z)
                 outputs = self.discriminator(fake_images)
-                d_loss_fake = self.D_loss(outputs.flatten(), fake_labels)
+                d_loss_fake = self.loss(outputs.flatten(), fake_labels)
                 fake_score = outputs
 
                 # Optimize discriminator
@@ -178,23 +182,22 @@ class DCGAN_Trainer(object):
                 d_loss.backward()
                 self.optimizer_D.step()
 
+                epoch_discriminator_loss += d_loss.item()
+
                 #####################################################################################
                 ################################## TRAIN GENERATOR ##################################
                 #####################################################################################
-                z = torch.randn((self.batch_size, self.generator.latent_dim))
+                z = torch.randn((self.batch_size, self.generator.latent_dim)).to(self.device)
                 fake_images = self.generator(z)
                 outputs = self.discriminator(fake_images)
-                g_loss = self.G_loss(outputs.flatten(), real_labels)
+                g_loss = self.loss(outputs.flatten(), real_labels)
 
                 self.discriminator.zero_grad()
                 self.generator.zero_grad()
                 g_loss.backward()
                 self.optimizer_G.step()
 
-                # Print loss and accuracy every 50 iterations
-                if i % 50 == 0:
-                    print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f'
-                        % (epoch + 1, self.num_epochs, i, len(self.dataloader), d_loss, g_loss))
+                epoch_generator_loss += g_loss.item()
 
             # save the time taken by the epoch
             self.epoch_times.append(t.time() - start_time)
@@ -205,6 +208,10 @@ class DCGAN_Trainer(object):
             self.G_loss.append(avg_generator_loss)
             self.D_loss.append(avg_discriminator_loss)
 
+            # Print the average losses at the end of the epoch
+            print(f"Epoch {epoch+1} completed in {self.epoch_times[-1]:.2f}s")
+            print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}")
+            
         total_time_end = t.time()
         self.training_time = total_time_end - total_time_start
         print('Time of training-{}'.format((self.training_time)))
