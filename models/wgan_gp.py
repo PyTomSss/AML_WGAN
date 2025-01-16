@@ -109,10 +109,13 @@ class WGANGP_Trainer(object):
         self.device = opt["device"]
         self.criterion = nn.BCELoss()
         self.batch_size = opt["batch_size"] 
-
+        self.beta1 = opt["beta1"]
+        self.beta2 = opt["beta2"]
+        
         # WGAN with gradient clipping uses RMSprop instead of ADAM
-        self.optimizer_D = optim.RMSprop(self.discriminator.parameters(), lr=self.lr)
-        self.optimizer_G = optim.RMSprop(self.generator.parameters(), lr=self.lr)
+        self.optimizer_D = optim.Adam(self.discriminator.parameters(), lr=self.lr, betas=(self.beta1, self.beta2))
+        self.optimizer_G = optim.Adam(self.generator.parameters(), lr=self.lr, betas=(self.beta1, self.beta2))
+
 
         self.fixed_latent_vector = torch.randn((1, self.generator.latent_dim)).to(self.device)
         self.n_critic = opt["n_critic"]
