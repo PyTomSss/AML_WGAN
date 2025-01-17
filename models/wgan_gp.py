@@ -180,7 +180,13 @@ class WGANGP_Trainer(object):
             epoch_discriminator_loss = 0
             epoch_generator_loss = 0
 
-            for i, (img, _) in enumerate(tqdm(self.dataloader, desc=f'Epoch {epoch+1}/{self.num_epochs}', ncols=100)):
+            # small modif not to overwhelm the notebook cells (1400 epochs...)
+            if (epoch + 1) % self.img_plot_periodicity == 0 or epoch == 0:
+                dataloader = tqdm(self.dataloader, desc=f'Epoch {epoch+1}/{self.num_epochs}', ncols=100)
+            else:
+                dataloader = self.dataloader
+
+            for i, (img, _) in enumerate(dataloader):
 
                 if img.size(0) < self.batch_size:
                     continue
