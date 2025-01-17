@@ -113,7 +113,6 @@ class DCGAN_Trainer(object):
         self.dataloader = dataloader
         # store accuracies and losses for plotting
         self.D_loss, self.G_loss, self.gradient_penalty_list = [], [], []
-        self.epoch_times = []
         self.lr = opt["lr"]
         self.beta1 = opt["beta1"]
         self.beta2 = opt["beta2"]
@@ -162,8 +161,6 @@ class DCGAN_Trainer(object):
         """
         self.discriminator.to(self.device)
         self.generator.to(self.device)
-        # we want to compare the rapidity of the training
-        total_time_start = t.time()
 
         for epoch in range(self.num_epochs):
             start_time = t.time()
@@ -221,28 +218,17 @@ class DCGAN_Trainer(object):
 
                 epoch_generator_loss += g_loss.item()
 
-            # save the time taken by the epoch
-            self.epoch_times.append(t.time() - start_time)
-
             # save the losses values at the end of each epoch
             avg_discriminator_loss = epoch_discriminator_loss / len(self.dataloader)
             avg_generator_loss = epoch_generator_loss / len(self.dataloader)
             self.G_loss.append(avg_generator_loss)
             self.D_loss.append(avg_discriminator_loss)
-
-            # Print the average losses at the end of the epoch
-            print(f"Epoch {epoch+1} completed in {self.epoch_times[-1]:.2f}s")
-            print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}")
             
             # Display generated image every 5 epochs
-            if (epoch + 1) % self.img_plot_periodicity == 0:
+            if (epoch + 1) % self.img_plot_periodicity == 0 or epoch == 0:
                 img = self.save_generated_image(epoch)
                 self.list_img.append(img)
-
-
-        total_time_end = t.time()
-        self.training_time = total_time_end - total_time_start
-        print('Time of training-{}'.format((self.training_time)))
+                print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}")
 
         save_path_generator = f"../trained_models/DCGANgenerator_epoch{self.num_epochs}.pth"
         save_path_discriminator = f"../trained_models/DCGANdiscriminator_epoch{self.num_epochs}.pth"
@@ -261,7 +247,7 @@ class DCGAN_Trainer(object):
         plt.legend()
         plt.show()
 
-        return self.G_loss, self.D_loss, self.epoch_times, self.training_time
+        return self.G_loss, self.D_loss, self.epoch_times
     
 # Exemple d'utilisation :
 # trainer = Trainer(discriminator, generator, dataloader, lr=0.0002, beta1=0.5, beta2=0.999, mode="wasserstein")

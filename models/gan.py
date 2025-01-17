@@ -29,8 +29,6 @@ class GAN(object):
             nn.Sigmoid()                  # Sigmoid activation to output probability
         )
 
-        # CUDA configuration for GPU support
-        self.cuda = opt["cuda"]
         self.device = opt["device"]
 
         # Binary Cross-Entropy Loss for both Generator and Discriminator
@@ -64,15 +62,11 @@ class GAN(object):
                 images = images.view(self.batch_size, -1)
                 z = torch.rand((self.batch_size, 100))  # Random noise for Generator input
 
-                # Move tensors to GPU if CUDA is enabled
-                if self.cuda :
-                    real_labels = Variable(torch.ones(self.batch_size)).to(self.device)  # Real labels
-                    fake_labels = Variable(torch.zeros(self.batch_size)).to(self.device)  # Fake labels
-                    images, z = Variable(images.to(self.device)), Variable(z.to(self.device))
-                else:
-                    real_labels = Variable(torch.ones(self.batch_size))  # Real labels
-                    fake_labels = Variable(torch.zeros(self.batch_size))  # Fake labels
-                    images, z = Variable(images), Variable(z)
+                # Move tensors to GPU 
+                real_labels = Variable(torch.ones(self.batch_size)).to(self.device)  # Real labels
+                fake_labels = Variable(torch.zeros(self.batch_size)).to(self.device)  # Fake labels
+                images, z = Variable(images.to(self.device)), Variable(z.to(self.device))
+
 
                 # --- Train the Discriminator ---
                 outputs = self.discriminator(images)                            # Discriminator output on real images
@@ -90,10 +84,8 @@ class GAN(object):
                 self.discriminator_optimizer.step()                            # Update Discriminator weights
 
                 # --- Train the Generator ---
-                if self.cuda:
-                    z = Variable(torch.randn(self.batch_size, 100).to(self.device))  # Random noise
-                else:
-                    z = Variable(torch.randn(self.batch_size, 100))
+                z = Variable(torch.randn(self.batch_size, 100).to(self.device))  # Random noise
+
                 fake_images = self.generator(z)                             # Generate fake images
                 outputs = self.discriminator(fake_images)                      # Discriminator output on fake images
                 g_loss = self.loss(outputs.flatten(), real_labels)  # Generator loss (goal: fool Discriminator)

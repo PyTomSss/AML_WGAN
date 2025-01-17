@@ -104,7 +104,6 @@ class WGANGP_Trainer(object):
 
         # store accuracies and losses for plotting
         self.D_loss, self.G_loss, self.gradient_penalty_list = [], [], []
-        self.epoch_times = []
         self.lr = opt["lr"] ## make it lower for wasserstein !!
         self.device = opt["device"]
         self.criterion = nn.BCELoss()
@@ -122,9 +121,8 @@ class WGANGP_Trainer(object):
         self.clip_val = opt["clip_val"]
         self.num_epochs = opt["num_epochs"]
         self.img_plot_periodicity = opt["img_plot_periodicity"]
-
-        self.lambda_gp = 10
         self.list_img = []
+        self.lambda_gp = 10
 
     def save_generated_image(self, epoch):
         """
@@ -177,10 +175,8 @@ class WGANGP_Trainer(object):
         self.discriminator.to(self.device)
         self.generator.to(self.device)
         # we want to compare the rapidity of the training
-        total_time_start = t.time()
 
         for epoch in range(self.num_epochs):
-            start_time = t.time()
             epoch_discriminator_loss = 0
             epoch_generator_loss = 0
 
@@ -226,27 +222,20 @@ class WGANGP_Trainer(object):
                 g_loss.backward()
                 self.optimizer_G.step()
 
-            # save the time taken by the epoch
-            self.epoch_times.append(t.time() - start_time)
-
             # save the losses values at the end of each epoch
             avg_discriminator_loss = epoch_discriminator_loss / len(self.dataloader)
             avg_generator_loss = epoch_generator_loss / len(self.dataloader)
             self.G_loss.append(avg_generator_loss)
             self.D_loss.append(avg_discriminator_loss)
-        
+
             # Print the average losses at the end of the epoch
-            print(f"Epoch {epoch+1} completed in {self.epoch_times[-1]:.2f}s")
-            print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}")
-            
+            # print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}")
+
             # Display generated image every 5 epochs
-            if (epoch + 1) % self.img_plot_periodicity == 0:
+            if (epoch + 1) % self.img_plot_periodicity == 0 or epoch == 0:
+                print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}")
                 img = self.save_generated_image(epoch)
                 self.list_img.append(img)
-
-        total_time_end = t.time()
-        self.training_time = total_time_end - total_time_start
-        print('Time of training-{}'.format((self.training_time)))
 
         save_path_generator = f"../trained_models/WGANCPgenerator_epoch{self.num_epochs}.pth"
         save_path_discriminator = f"../trained_models/WGANCPdiscriminator_epoch{self.num_epochs}.pth"
@@ -265,4 +254,4 @@ class WGANGP_Trainer(object):
         plt.legend()
         plt.show()
 
-        return self.G_loss, self.D_loss, self.epoch_times, self.training_time
+        return self.G_loss, self.D_loss, self.epoch_times
