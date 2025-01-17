@@ -261,7 +261,7 @@ class DCGAN_Trainer(object):
         plt.legend()
         plt.show()
 
-        return self.G_loss, self.D_loss
+        return self.G_loss, self.D_loss, self.G_gradient_norms, self.D_gradient_norms
     
 # Exemple d'utilisation :
 # trainer = Trainer(discriminator, generator, dataloader, lr=0.0002, beta1=0.5, beta2=0.999, mode="wasserstein")
