@@ -124,6 +124,8 @@ class DCGAN_Trainer(object):
         self.optimizer_G = optim.Adam(self.generator.parameters(), lr=self.lr, betas=(self.beta1, self.beta2))
 
         self.loss = nn.BCELoss().to(self.device)
+        self.D_gradient_norms = []  # Discriminator gradient norms
+        self.G_gradient_norms = []
 
         self.num_epochs = opt["num_epochs"]
         # Fix a latent vector to generate consistent images
@@ -141,13 +143,13 @@ class DCGAN_Trainer(object):
         generated_image = generated_image.squeeze(0).cpu().numpy().transpose(1, 2, 0)  # Reshape for visualization
         generated_image = (generated_image * 255).astype('uint8')  # Scale to [0, 255]
 
-        return generated_image
-
         plt.imshow(generated_image, cmap='gray' if generated_image.shape[-1] == 1 else None)
         plt.axis('off')
         plt.title(f"Epoch {epoch+1}")
         plt.savefig(f"generated_image_epoch_{epoch+1}.png")
         plt.show()
+
+        return generated_image
 
     def train(self):
         """
@@ -163,12 +165,16 @@ class DCGAN_Trainer(object):
         self.generator.to(self.device)
 
         for epoch in range(self.num_epochs):
-            start_time = t.time()
             epoch_discriminator_loss = 0
             epoch_generator_loss = 0
 
+            # small modif not to overwhelm the notebook cells (1400 epochs...)
+            if (epoch + 1) % self.img_plot_periodicity == 0 or epoch == 0:
+                dataloader = tqdm(self.dataloader, desc=f'Epoch {epoch+1}/{self.num_epochs}', ncols=100)
+            else:
+                dataloader = self.dataloader
 
-            for i, (img, _) in enumerate(tqdm(self.dataloader, desc=f'Epoch {epoch+1}/{self.num_epochs}', ncols=100)):
+            for i, (img, _) in enumerate(dataloader):
 
                 if img.size(0) < self.batch_size:
                     continue
@@ -201,6 +207,10 @@ class DCGAN_Trainer(object):
                 d_loss.backward()
                 self.optimizer_D.step()
 
+                # Compute and store gradient norms for the discriminator --> to see whether gradients vanish
+                D_grad_norm = sum(param.grad.norm().item() for param in self.discriminator.parameters() if param.grad is not None)
+                self.D_gradient_norms.append(D_grad_norm)
+
                 epoch_discriminator_loss += d_loss.item()
 
                 #####################################################################################
@@ -216,6 +226,10 @@ class DCGAN_Trainer(object):
                 g_loss.backward()
                 self.optimizer_G.step()
 
+                # Compute and store gradient norms for the generator
+                G_grad_norm = sum(param.grad.norm().item() for param in self.generator.parameters() if param.grad is not None)
+                self.G_gradient_norms.append(G_grad_norm)
+
                 epoch_generator_loss += g_loss.item()
 
             # save the losses values at the end of each epoch
@@ -228,7 +242,7 @@ class DCGAN_Trainer(object):
             if (epoch + 1) % self.img_plot_periodicity == 0 or epoch == 0:
                 img = self.save_generated_image(epoch)
                 self.list_img.append(img)
-                print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}")
+                print(f"Avg Loss_D: {avg_discriminator_loss:.4f}\tAvg Loss_G: {avg_generator_loss:.4f}\tG gradient norm: {G_grad_norm:.4f}\tD gradient norm: {D_grad_norm:.4f}")
 
         save_path_generator = f"../trained_models/DCGANgenerator_epoch{self.num_epochs}.pth"
         save_path_discriminator = f"../trained_models/DCGANdiscriminator_epoch{self.num_epochs}.pth"
@@ -247,7 +261,7 @@ class DCGAN_Trainer(object):
         plt.legend()
         plt.show()
 
-        return self.G_loss, self.D_loss, self.epoch_times
+        return self.G_loss, self.D_loss
     
 # Exemple d'utilisation :
 # trainer = Trainer(discriminator, generator, dataloader, lr=0.0002, beta1=0.5, beta2=0.999, mode="wasserstein")
