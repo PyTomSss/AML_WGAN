@@ -124,6 +124,9 @@ class WGANGP_Trainer(object):
         self.list_img = []
         self.lambda_gp = 10
 
+        self.D_gradient_norms = []  # Discriminator gradient norms
+        self.G_gradient_norms = []
+
     def save_generated_image(self, epoch):
         """
         Generate and save an image using the fixed latent vector.
@@ -137,7 +140,7 @@ class WGANGP_Trainer(object):
         plt.imshow(generated_image, cmap='gray' if generated_image.shape[-1] == 1 else None)
         plt.axis('off')
         plt.title(f"Epoch {epoch+1}")
-        plt.savefig(f"generated_image_epoch_{epoch+1}.png")
+        plt.savefig(f"generated_image_WGANGP_epoch_{epoch+1/self.num_epochs}.png")
         plt.show()
 
         return generated_image
@@ -213,6 +216,10 @@ class WGANGP_Trainer(object):
                     d_loss.backward()
                     self.optimizer_D.step()
 
+                # Compute and store gradient norms for the discriminator --> to see whether gradients vanish
+                D_grad_norm = sum(param.grad.norm().item() for param in self.discriminator.parameters() if param.grad is not None)
+                self.D_gradient_norms.append(D_grad_norm)
+
                 epoch_discriminator_loss += d_loss.item()
 
                 #####################################################################################
@@ -223,10 +230,15 @@ class WGANGP_Trainer(object):
                 fake_imgs = self.generator(z)
                 g_loss = -torch.mean(self.discriminator(fake_imgs))
 
-                epoch_generator_loss += g_loss.item()
                 self.optimizer_G.zero_grad()
                 g_loss.backward()
                 self.optimizer_G.step()
+
+                # Compute and store gradient norms for the generator
+                G_grad_norm = sum(param.grad.norm().item() for param in self.generator.parameters() if param.grad is not None)
+                self.G_gradient_norms.append(G_grad_norm)
+
+                epoch_generator_loss += g_loss.item()
 
             # save the losses values at the end of each epoch
             avg_discriminator_loss = epoch_discriminator_loss / len(self.dataloader)
@@ -260,4 +272,4 @@ class WGANGP_Trainer(object):
         plt.legend()
         plt.show()
 
-        return self.G_loss, self.D_loss, self.epoch_times
+        return self.G_loss, self.D_loss, self.G_gradient_norms, self.D_gradient_norms, self.list_img
